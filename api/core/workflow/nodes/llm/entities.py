@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -68,6 +68,27 @@ class LLMNodeData(BaseNodeData):
     structured_output: Mapping[str, Any] | None = None
     # We used 'structured_output_enabled' in the past, but it's not a good name.
     structured_output_switch_on: bool = Field(False, alias="structured_output_enabled")
+    reasoning_format: Literal["auto", "legacy", "field"] = Field(
+        default="auto",
+        description=(
+            """
+            Strategy for handling model reasoning output.
+
+            auto : Detects the output form and applies the safest rule
+                    1) If the model returns a `reasoning_content` field, keep it.
+                    2) Else if <think>…</think> blocks are found, strip the tags
+                        and move their inner text to `reasoning_content`.
+                    3) Else (no tags, no field) keep the original text unchanged.
+
+            legacy : Always leave <think> tags in the text; no `reasoning_content`
+                    field is set, for maximum backward compatibility.
+
+            field : Always strip <think> tags (if any) and expose their inner text
+                    through `reasoning_content`, while returning the cleaned text
+                    as the main output.
+            """
+        )
+    )
 
     @field_validator("prompt_config", mode="before")
     @classmethod
