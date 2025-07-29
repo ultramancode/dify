@@ -22,6 +22,7 @@ from docx.text.paragraph import Paragraph
 
 from configs import dify_config
 from core.file import File, FileTransferMethod, file_manager
+from core.file.hwpx_extractor import HwpxExtractor
 from core.helper import ssrf_proxy
 from core.variables import ArrayFileSegment
 from core.variables.segments import ArrayStringSegment, FileSegment
@@ -120,6 +121,8 @@ def _extract_text_by_mime_type(*, file_content: bytes, mime_type: str) -> str:
             return _extract_text_from_doc(file_content)
         case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             return _extract_text_from_docx(file_content)
+        case "application/hwp+zip" | "application/haansofthwp":
+            return _extract_text_from_hwpx(file_content)
         case "text/csv":
             return _extract_text_from_csv(file_content)
         case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" | "application/vnd.ms-excel":
@@ -153,6 +156,8 @@ def _extract_text_by_file_extension(*, file_content: bytes, file_extension: str)
             return _extract_text_from_plain_text(file_content)
         case ".json":
             return _extract_text_from_json(file_content)
+        case ".hwpx":
+            return _extract_text_from_hwpx(file_content)
         case ".yaml" | ".yml":
             return _extract_text_from_yaml(file_content)
         case ".pdf":
@@ -624,3 +629,12 @@ def _extract_text_from_properties(file_content: bytes) -> str:
         return "\n".join(result)
     except Exception as e:
         raise TextExtractionError(f"Failed to extract text from properties file: {str(e)}") from e
+
+
+def _extract_text_from_hwpx(file_content: bytes) -> str:
+    """Extract text from a HWPX file."""
+    try:
+        extractor = HwpxExtractor(file_content)
+        return extractor.extract()
+    except Exception as e:
+        raise TextExtractionError(f"Failed to extract text from HWPX file: {str(e)}")

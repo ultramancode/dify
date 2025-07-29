@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import logging
+import re
 from collections.abc import Generator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -345,7 +346,6 @@ class LLMNode(BaseNode[LLMNodeData]):
         # For streaming mode
         model = ""
         prompt_messages: list[PromptMessage] = []
-
         usage = LLMUsage.empty_usage()
         finish_reason = None
         full_text_buffer = io.StringIO()
@@ -356,18 +356,22 @@ class LLMNode(BaseNode[LLMNodeData]):
                     yield result
                 if isinstance(result, LLMResultChunk):
                     contents = result.delta.message.content
-                    for text_part in self._save_multimodal_output_and_convert_result_to_markdown(contents):
-                        full_text_buffer.write(text_part)
+                    if isinstance(contents, str):
+                        full_text_buffer.write(contents)
                         yield RunStreamChunkEvent(
-                            chunk_content=text_part, from_variable_selector=[self.node_id, "text"]
+                            chunk_content=contents, from_variable_selector=[self.node_id, "text"]
                         )
+                    else:
+                        for text_part in self._save_multimodal_output_and_convert_result_to_markdown(contents):
+                            full_text_buffer.write(text_part)
+                            yield RunStreamChunkEvent(
+                                chunk_content=text_part, from_variable_selector=[self.node_id, "text"]
+                            )
 
                     # Update the whole metadata
                     if not model and result.model:
                         model = result.model
                     if len(prompt_messages) == 0:
-                        # TODO(QuantumGhost): it seems that this update has no visable effect.
-                        # What's the purpose of the line below?
                         prompt_messages = list(result.prompt_messages)
                     if usage.prompt_tokens == 0 and result.delta.usage:
                         usage = result.delta.usage
@@ -376,7 +380,11 @@ class LLMNode(BaseNode[LLMNodeData]):
         except OutputParserError as e:
             raise LLMNodeError(f"Failed to parse structured output: {e}")
 
-        yield ModelInvokeCompletedEvent(text=full_text_buffer.getvalue(), usage=usage, finish_reason=finish_reason)
+        yield ModelInvokeCompletedEvent(
+            text=full_text_buffer.getvalue(),
+            usage=usage,
+            finish_reason=finish_reason,
+        )
 
     def _image_file_to_markdown(self, file: "File", /):
         text_chunk = f"![]({file.generate_url()})"

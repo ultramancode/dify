@@ -1,4 +1,5 @@
 import io
+import zipfile
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -17,7 +18,9 @@ from core.workflow.nodes.document_extractor.node import (
     _extract_text_from_excel,
     _extract_text_from_pdf,
     _extract_text_from_plain_text,
+    _extract_text_from_hwpx,
 )
+from core.file.hwpx_extractor import TextExtractionError
 from core.workflow.nodes.enums import NodeType
 
 
@@ -67,6 +70,39 @@ def test_run_invalid_variable_type(document_extractor_node, mock_graph_runtime_s
     assert "is not an ArrayFileSegment" in result.error
 
 
+def create_test_hwpx_content() -> bytes:
+    """Create a test HWPX file content with proper ZIP structure"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 필수 파일들 추가
+        zf.writestr('mimetype', b'application/hwp+zip')
+        zf.writestr('META-INF/container.xml', b'''<?xml version="1.0" encoding="UTF-8"?>
+        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+            <rootfiles>
+                <rootfile full-path="Contents/content.hpf" media-type="application/hwp+zip"/>
+            </rootfiles>
+        </container>''')
+        
+        # 실제 내용이 있는 section0.xml
+        content = '''<?xml version="1.0" encoding="UTF-8"?>
+        <sec xmlns="http://www.hancom.co.kr/hwpml/2011/section">
+            <p>test content</p>
+        </sec>'''
+        zf.writestr('Contents/section0.xml', content.encode('utf-8'))
+        
+        # 메타데이터 파일
+        zf.writestr('Contents/content.hpf', b'''<?xml version="1.0" encoding="UTF-8"?>
+        <package>
+            <metadata>
+                <title>Test Document</title>
+            </metadata>
+            <manifest>
+                <item id="section0" href="Contents/section0.xml" media-type="application/xml"/>
+            </manifest>
+        </package>''')
+    return buffer.getvalue()
+
+
 @pytest.mark.parametrize(
     ("mime_type", "file_content", "expected_text", "transfer_method", "extension"),
     [
@@ -97,6 +133,13 @@ def test_run_invalid_variable_type(document_extractor_node, mock_graph_runtime_s
             ["Remote content"],
             FileTransferMethod.REMOTE_URL,
             None,
+        ),
+        (
+            "application/hwp+zip",
+            create_test_hwpx_content(),
+            ["test content"],
+            FileTransferMethod.LOCAL_FILE,
+            ".hwpx"
         ),
     ],
 )
@@ -138,6 +181,9 @@ def test_run_extract_text(
     elif mime_type.startswith("application/vnd.openxmlformats"):
         mock_docx_extract = Mock(return_value=expected_text[0])
         monkeypatch.setattr("core.workflow.nodes.document_extractor.node._extract_text_from_docx", mock_docx_extract)
+    elif mime_type == "application/hwp+zip":
+        mock_hwpx_extract = Mock(return_value=expected_text[0])
+        monkeypatch.setattr("core.workflow.nodes.document_extractor.node._extract_text_from_hwpx", mock_hwpx_extract)
 
     result = document_extractor_node._run()
 
@@ -365,3 +411,105 @@ def test_extract_text_from_excel_numeric_type_column(mock_excel_file):
     expected_manual = "| 1.0 | 1.1 |\n| --- | --- |\n| Test | Test |\n\n"
 
     assert expected_manual == result
+
+
+def test_analyze_test_hwpx_structure():
+    """테스트용 HWPX 파일의 구조를 분석"""
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+    
+    # 테스트용 HWPX 파일 생성
+    content = create_test_hwpx_content()
+    
+    # ZIP 파일 구조 분석
+    import zipfile
+    import io
+    
+    buffer = io.BytesIO(content)
+    with zipfile.ZipFile(buffer) as zf:
+        # 모든 파일 목록 출력
+        print("\nFiles in test HWPX:")
+        for name in zf.namelist():
+            print(f"- {name}")
+            # 각 파일의 내용도 출력
+            with zf.open(name) as f:
+                content = f.read().decode('utf-8', errors='ignore')
+                print(f"\nContents of {name}:")
+                print(content)
+                print("-" * 50)
+
+
+def test_extract_text_from_hwpx():
+    """Test extracting text from HWPX file"""
+    from core.file.hwpx_extractor import create_test_hwpx_content
+    
+    # 테스트용 HWPX 파일 생성 (한컴 표준 문서 기반)
+    test_content = create_test_hwpx_content("test content")
+    
+    # 노드 설정
+    node = DocumentExtractorNode()
+    node.validate_and_process({
+        "file": {
+            "content": test_content,
+            "mime_type": "application/hwp+zip"
+        }
+    })
+    
+    # 결과 검증
+    assert node.output == "test content"
+
+
+def test_extract_text_from_invalid_hwpx():
+    """Test extracting text from invalid HWPX file"""
+    # 잘못된 HWPX 파일 내용
+    invalid_content = b"This is not a valid HWPX file"
+    
+    # 노드 설정
+    node = DocumentExtractorNode()
+    
+    # 예외 발생 확인
+    with pytest.raises(Exception) as context:
+        node.validate_and_process({
+            "file": {
+                "content": invalid_content,
+                "mime_type": "application/hwp+zip"
+            }
+        })
+    
+    # 에러 메시지 확인
+    assert "Invalid HWPX file" in str(context.exception)
+
+
+def test_analyze_real_hwpx_structure():
+    """실제 HWPX 파일의 구조를 분석하는 테스트"""
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+    
+    # 실제 HWPX 파일 읽기
+    with open("path/to/real.hwpx", "rb") as f:
+        content = f.read()
+    
+    # ZIP 파일 구조 분석
+    import zipfile
+    import io
+    
+    buffer = io.BytesIO(content)
+    with zipfile.ZipFile(buffer) as zf:
+        # 모든 파일 목록 출력
+        print("\nFiles in HWPX:")
+        for name in zf.namelist():
+            print(f"- {name}")
+        
+        # section0.xml 내용 분석
+        if "Contents/section0.xml" in zf.namelist():
+            with zf.open("Contents/section0.xml") as f:
+                content = f.read().decode('utf-8')
+                print("\nContents of section0.xml:")
+                print(content[:500])  # 처음 500자만 출력
+        
+        # content.hpf 내용 분석
+        if "Contents/content.hpf" in zf.namelist():
+            with zf.open("Contents/content.hpf") as f:
+                content = f.read().decode('utf-8')
+                print("\nContents of content.hpf:")
+                print(content[:500])  # 처음 500자만 출력
