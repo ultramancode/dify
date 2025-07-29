@@ -2,6 +2,8 @@ import base64
 import io
 import json
 import logging
+import re
+
 from collections.abc import Generator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -169,6 +171,7 @@ class LLMNode(BaseNode):
         result_text = ""
         usage = LLMUsage.empty_usage()
         finish_reason = None
+        reasoning_content = None
         variable_pool = self.graph_runtime_state.variable_pool
 
         try:
@@ -269,6 +272,7 @@ class LLMNode(BaseNode):
                     result_text = event.text
                     usage = event.usage
                     finish_reason = event.finish_reason
+                    reasoning_content = event.reasoning_content
                     # deduct quota
                     llm_utils.deduct_llm_quota(tenant_id=self.tenant_id, model_instance=model_instance, usage=usage)
                     break
@@ -287,6 +291,8 @@ class LLMNode(BaseNode):
             }
 
             outputs = {"text": result_text, "usage": jsonable_encoder(usage), "finish_reason": finish_reason}
+            if reasoning_content:
+                outputs["reasoning_content"] = reasoning_content
             if structured_output:
                 outputs["structured_output"] = structured_output.structured_output
             if self._file_outputs is not None:
@@ -432,12 +438,51 @@ class LLMNode(BaseNode):
         except OutputParserError as e:
             raise LLMNodeError(f"Failed to parse structured output: {e}")
 
-        yield ModelInvokeCompletedEvent(text=full_text_buffer.getvalue(), usage=usage, finish_reason=finish_reason)
+        # Split reasoning content from final text
+        full_text = full_text_buffer.getvalue()
+        clean_text, reasoning_content = LLMNode._split_reasoning(full_text)
+        
+        yield ModelInvokeCompletedEvent(
+            text=clean_text, 
+            usage=usage, 
+            finish_reason=finish_reason,
+            reasoning_content=reasoning_content
+        )
 
     @staticmethod
     def _image_file_to_markdown(file: "File", /):
         text_chunk = f"![]({file.generate_url()})"
         return text_chunk
+
+    @staticmethod
+    def _split_reasoning(text: str) -> tuple[str, str | None]:
+        """
+        Split reasoning content from text by extracting <think>...</think> blocks.
+        
+        Args:
+            text: Full text that may contain <think> blocks
+            
+        Returns:
+            tuple of (clean_text, reasoning_content)
+        """
+        
+        # Find all <think>...</think> blocks (including nested ones)
+        think_pattern = r'<think>(.*?)</think>'
+        matches = re.findall(think_pattern, text, re.DOTALL)
+        
+        if not matches:
+            return text, None
+            
+        # Extract reasoning content
+        reasoning_content = '\n'.join(matches).strip()
+        
+        # Remove all <think>...</think> blocks from original text
+        clean_text = re.sub(think_pattern, '', text, flags=re.DOTALL)
+        
+        # Clean up extra whitespace
+        clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
+        
+        return clean_text, reasoning_content if reasoning_content else None
 
     def _transform_chat_messages(
         self, messages: Sequence[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate, /
@@ -975,10 +1020,15 @@ class LLMNode(BaseNode):
         ):
             buffer.write(text_part)
 
+        # Split reasoning content from final text
+        full_text = buffer.getvalue()
+        clean_text, reasoning_content = LLMNode._split_reasoning(full_text)
+        
         return ModelInvokeCompletedEvent(
-            text=buffer.getvalue(),
+            text=clean_text,
             usage=invoke_result.usage,
             finish_reason=None,
+            reasoning_content=reasoning_content,
         )
 
     @staticmethod
