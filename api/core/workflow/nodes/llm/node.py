@@ -273,10 +273,13 @@ class LLMNode(BaseNode):
                 if isinstance(event, RunStreamChunkEvent):
                     yield event
                 elif isinstance(event, ModelInvokeCompletedEvent):
-                    result_text = event.text
+                    # Full text with <think> tags for frontend
+                    result_text = event.text  
                     usage = event.usage
                     finish_reason = event.finish_reason
                     reasoning_content = event.reasoning_content
+                    # For downstream nodes, use clean text without <think> tags
+                    clean_text, _ = LLMNode._split_reasoning(result_text, self._node_data.reasoning_format)
                     # deduct quota
                     llm_utils.deduct_llm_quota(tenant_id=self.tenant_id, model_instance=model_instance, usage=usage)
                     break
@@ -294,7 +297,7 @@ class LLMNode(BaseNode):
                 "model_name": model_config.model,
             }
 
-            outputs = {"text": result_text, "usage": jsonable_encoder(usage), "finish_reason": finish_reason}
+            outputs = {"text": clean_text, "usage": jsonable_encoder(usage), "finish_reason": finish_reason}
             if reasoning_content:
                 outputs["reasoning_content"] = reasoning_content
             if structured_output:
@@ -451,10 +454,12 @@ class LLMNode(BaseNode):
         clean_text, reasoning_content = LLMNode._split_reasoning(full_text, reasoning_format)
         
         yield ModelInvokeCompletedEvent(
-            text=clean_text, 
+            # Keep original text with <think> tags for frontend compatibility
+            text=full_text,  
             usage=usage, 
             finish_reason=finish_reason,
-            reasoning_content=reasoning_content
+            # Separate reasoning field for API/plugins
+            reasoning_content=reasoning_content  
         )
 
     @staticmethod
@@ -1054,11 +1059,14 @@ class LLMNode(BaseNode):
         full_text = buffer.getvalue()
         clean_text, reasoning_content = LLMNode._split_reasoning(full_text, reasoning_format)
         
+
         return ModelInvokeCompletedEvent(
-            text=clean_text,
+            # Keep original text with <think> tags for frontend compatibility
+            text=full_text,  
             usage=invoke_result.usage,
             finish_reason=None,
-            reasoning_content=reasoning_content,
+            # Separate reasoning field for API/plugins
+            reasoning_content=reasoning_content,  
         )
 
     @staticmethod
