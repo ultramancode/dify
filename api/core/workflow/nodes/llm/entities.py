@@ -74,18 +74,17 @@ class LLMNodeData(BaseNodeData):
             """
             Strategy for handling model reasoning output.
 
-            auto : Detects the output form and applies the safest rule
-                    1) If the model returns a `reasoning_content` field, keep it.
-                    2) Else if <think>…</think> blocks are found, strip the tags
-                        and move their inner text to `reasoning_content`.
-                    3) Else (no tags, no field) keep the original text unchanged.
+            auto: Smart default
+                    If <think>…</think> blocks exist, strip the tags and move the inner text to
+                    `reasoning_content`. If no tags are present, leave the original text unchanged 
+                    and omit `reasoning_content` field.
 
-            legacy : Always leave <think> tags in the text; no `reasoning_content`
-                    field is set, for maximum backward compatibility.
+            legacy: Leave <think> tags intact; never set `reasoning_content`. 
+                    Use this for strict backward compatibility.
 
-            field : Always strip <think> tags (if any) and expose their inner text
-                    through `reasoning_content`, while returning the cleaned text
-                    as the main output.
+            field : Always return a `reasoning_content` field. 
+                    If <think> tags are present, strip them and use the inner text;  
+                    if no tags are present, an empty string is returned.
             """
         )
     )
