@@ -5,7 +5,7 @@ import logging
 import re
 
 from collections.abc import Generator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 
 from core.app.entities.app_invoke_entities import ModelConfigWithCredentialsEntity
 from core.file import FileType, file_manager
@@ -102,6 +102,9 @@ class LLMNode(BaseNode):
     _node_type = NodeType.LLM
 
     _node_data: LLMNodeData
+
+    # Compiled regex for extracting <think> blocks (with compatibility for attributes)
+    _THINK_PATTERN = re.compile(r'<think[^>]*>(.*?)</think>', re.IGNORECASE | re.DOTALL)
 
     # Instance attributes specific to LLMNode.
     # Output variable for file
@@ -261,6 +264,7 @@ class LLMNode(BaseNode):
                 file_saver=self._llm_file_saver,
                 file_outputs=self._file_outputs,
                 node_id=self.node_id,
+                reasoning_format=self._node_data.reasoning_format,
             )
 
             structured_output: LLMStructuredOutput | None = None
@@ -346,6 +350,7 @@ class LLMNode(BaseNode):
         file_saver: LLMFileSaver,
         file_outputs: list["File"],
         node_id: str,
+        reasoning_format: str = "auto",
     ) -> Generator[NodeEvent | LLMStructuredOutput, None, None]:
         model_schema = model_instance.model_type_instance.get_model_schema(
             node_data_model.name, model_instance.credentials
@@ -382,6 +387,7 @@ class LLMNode(BaseNode):
             file_saver=file_saver,
             file_outputs=file_outputs,
             node_id=node_id,
+            reasoning_format=reasoning_format,
         )
 
     @staticmethod
@@ -391,6 +397,7 @@ class LLMNode(BaseNode):
         file_saver: LLMFileSaver,
         file_outputs: list["File"],
         node_id: str,
+        reasoning_format: str = "auto",
     ) -> Generator[NodeEvent | LLMStructuredOutput, None, None]:
         # For blocking mode
         if isinstance(invoke_result, LLMResult):
@@ -398,6 +405,7 @@ class LLMNode(BaseNode):
                 invoke_result=invoke_result,
                 saver=file_saver,
                 file_outputs=file_outputs,
+                reasoning_format=reasoning_format,
             )
             yield event
             return
@@ -440,7 +448,7 @@ class LLMNode(BaseNode):
 
         # Split reasoning content from final text
         full_text = full_text_buffer.getvalue()
-        clean_text, reasoning_content = LLMNode._split_reasoning(full_text)
+        clean_text, reasoning_content = LLMNode._split_reasoning(full_text, reasoning_format)
         
         yield ModelInvokeCompletedEvent(
             text=clean_text, 
@@ -454,35 +462,56 @@ class LLMNode(BaseNode):
         text_chunk = f"![]({file.generate_url()})"
         return text_chunk
 
-    @staticmethod
-    def _split_reasoning(text: str) -> tuple[str, str | None]:
+    @classmethod
+    def _split_reasoning(
+        cls, 
+        text: str, 
+        reasoning_format: Literal["auto", "legacy", "field"] = "auto"
+    ) -> tuple[str, str | None]:
         """
-        Split reasoning content from text by extracting <think>...</think> blocks.
+        Split reasoning content from text based on reasoning_format strategy.
         
         Args:
             text: Full text that may contain <think> blocks
+            reasoning_format: Strategy for handling reasoning content
+                - "auto": Smart default - strips <think> tags only when found, no field if no tags
+                - "legacy": Always leave <think> tags in text, no reasoning_content field  
+                - "field": Always provide reasoning_content field (empty string if no tags)
             
         Returns:
             tuple of (clean_text, reasoning_content)
         """
         
-        # Find all <think>...</think> blocks (including nested ones)
-        think_pattern = r'<think>(.*?)</think>'
-        matches = re.findall(think_pattern, text, re.DOTALL)
-        
-        if not matches:
+        # Legacy mode: keep everything as-is, no reasoning_content extraction
+        if reasoning_format == "legacy":
             return text, None
-            
-        # Extract reasoning content
-        reasoning_content = '\n'.join(matches).strip()
+        
+        # Find all <think>...</think> blocks (case-insensitive)
+        matches = cls._THINK_PATTERN.findall(text)
+        
+        # Auto mode: only process if tags are found, otherwise return original
+        if reasoning_format == "auto" and not matches:
+            return text, None
+        
+        # Extract reasoning content from all <think> blocks
+        reasoning_content = '\n'.join(match.strip() for match in matches) if matches else ""
         
         # Remove all <think>...</think> blocks from original text
-        clean_text = re.sub(think_pattern, '', text, flags=re.DOTALL)
+        clean_text = cls._THINK_PATTERN.sub('', text)
         
         # Clean up extra whitespace
         clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
         
-        return clean_text, reasoning_content if reasoning_content else None
+        # Field mode: always return reasoning_content field (even if empty string)
+        if reasoning_format == "field":
+            return clean_text, reasoning_content
+        
+        # Auto mode with tags found: return reasoning_content only if non-empty
+        if reasoning_format == "auto":
+            return clean_text, reasoning_content if reasoning_content else None
+        
+        # Unknown format, default to legacy behavior
+        return text, None
 
     def _transform_chat_messages(
         self, messages: Sequence[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate, /
@@ -1011,6 +1040,7 @@ class LLMNode(BaseNode):
         invoke_result: LLMResult,
         saver: LLMFileSaver,
         file_outputs: list["File"],
+        reasoning_format: str = "auto",
     ) -> ModelInvokeCompletedEvent:
         buffer = io.StringIO()
         for text_part in LLMNode._save_multimodal_output_and_convert_result_to_markdown(
@@ -1022,7 +1052,7 @@ class LLMNode(BaseNode):
 
         # Split reasoning content from final text
         full_text = buffer.getvalue()
-        clean_text, reasoning_content = LLMNode._split_reasoning(full_text)
+        clean_text, reasoning_content = LLMNode._split_reasoning(full_text, reasoning_format)
         
         return ModelInvokeCompletedEvent(
             text=clean_text,
