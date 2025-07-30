@@ -277,9 +277,19 @@ class LLMNode(BaseNode):
                     result_text = event.text  
                     usage = event.usage
                     finish_reason = event.finish_reason
-                    reasoning_content = event.reasoning_content
-                    # For downstream nodes, use clean text without <think> tags
-                    clean_text, _ = LLMNode._split_reasoning(result_text, self._node_data.reasoning_format)
+                    reasoning_content = event.reasoning_content or ""
+                    
+                    # For downstream nodes, determine clean text based on reasoning_format
+                    if self._node_data.reasoning_format == "legacy":
+                        clean_text = result_text  # Keep <think> tags for backward compatibility
+                    else:  # separated
+                        if reasoning_content:
+                            # Structured models: already clean
+                            clean_text = result_text
+                        else:
+                            # Legacy models: extract clean text
+                            clean_text, _ = LLMNode._split_reasoning(result_text, self._node_data.reasoning_format)
+                    
                     # deduct quota
                     llm_utils.deduct_llm_quota(tenant_id=self.tenant_id, model_instance=model_instance, usage=usage)
                     break
@@ -297,9 +307,12 @@ class LLMNode(BaseNode):
                 "model_name": model_config.model,
             }
 
-            outputs = {"text": clean_text, "usage": jsonable_encoder(usage), "finish_reason": finish_reason}
-            if reasoning_content:
-                outputs["reasoning_content"] = reasoning_content
+            outputs = {
+                "text": clean_text, 
+                "usage": jsonable_encoder(usage), 
+                "finish_reason": finish_reason,
+                "reasoning_content": reasoning_content
+            }
             if structured_output:
                 outputs["structured_output"] = structured_output.structured_output
             if self._file_outputs is not None:
@@ -353,7 +366,7 @@ class LLMNode(BaseNode):
         file_saver: LLMFileSaver,
         file_outputs: list["File"],
         node_id: str,
-        reasoning_format: str = "auto",
+        reasoning_format: str = "separated",
     ) -> Generator[NodeEvent | LLMStructuredOutput, None, None]:
         model_schema = model_instance.model_type_instance.get_model_schema(
             node_data_model.name, model_instance.credentials
@@ -400,7 +413,7 @@ class LLMNode(BaseNode):
         file_saver: LLMFileSaver,
         file_outputs: list["File"],
         node_id: str,
-        reasoning_format: str = "auto",
+        reasoning_format: str = "separated",
     ) -> Generator[NodeEvent | LLMStructuredOutput, None, None]:
         # For blocking mode
         if isinstance(invoke_result, LLMResult):
@@ -420,6 +433,7 @@ class LLMNode(BaseNode):
         usage = LLMUsage.empty_usage()
         finish_reason = None
         full_text_buffer = io.StringIO()
+        reasoning_content_buffer = io.StringIO()
         # Consume the invoke result and handle generator exception
         try:
             for result in invoke_result:
@@ -434,6 +448,11 @@ class LLMNode(BaseNode):
                     ):
                         full_text_buffer.write(text_part)
                         yield RunStreamChunkEvent(chunk_content=text_part, from_variable_selector=[node_id, "text"])
+
+                    # Accumulate reasoning content from structured models
+                    reasoning_chunk = getattr(result.delta.message, 'reasoning_content', '')
+                    if reasoning_chunk:
+                        reasoning_content_buffer.write(reasoning_chunk)
 
                     # Update the whole metadata
                     if not model and result.model:
@@ -451,7 +470,25 @@ class LLMNode(BaseNode):
 
         # Split reasoning content from final text
         full_text = full_text_buffer.getvalue()
-        clean_text, reasoning_content = LLMNode._split_reasoning(full_text, reasoning_format)
+        accumulated_reasoning = reasoning_content_buffer.getvalue()
+        
+        # Always provide reasoning_content for workflow consistency
+        if accumulated_reasoning:
+            # Structured models: reasoning already separated
+            reasoning_content = accumulated_reasoning
+            if reasoning_format == "legacy":
+                clean_text = full_text  # Keep original format (with any existing tags)
+            else:  # separated
+                clean_text = full_text  # Already clean from structured models
+        else:
+            # Legacy models: extract from <think> tags
+            if reasoning_format == "legacy":
+                clean_text = full_text  # Keep <think> tags in text
+                extracted_reasoning = ""  # No parsing needed for legacy mode
+            else:  # separated
+                extracted_clean_text, extracted_reasoning = LLMNode._split_reasoning(full_text, reasoning_format)
+                clean_text = extracted_clean_text  # Remove <think> tags
+            reasoning_content = extracted_reasoning or ""
         
         yield ModelInvokeCompletedEvent(
             # Keep original text with <think> tags for frontend compatibility
@@ -471,32 +508,28 @@ class LLMNode(BaseNode):
     def _split_reasoning(
         cls, 
         text: str, 
-        reasoning_format: Literal["auto", "legacy", "field"] = "auto"
+        reasoning_format: Literal["separated", "legacy"] = "separated"
     ) -> tuple[str, str | None]:
         """
         Split reasoning content from text based on reasoning_format strategy.
-        
+
         Args:
             text: Full text that may contain <think> blocks
             reasoning_format: Strategy for handling reasoning content
-                - "auto": Smart default - strips <think> tags only when found, no field if no tags
-                - "legacy": Always leave <think> tags in text, no reasoning_content field  
-                - "field": Always provide reasoning_content field (empty string if no tags)
-            
+                - "separated": Remove <think> tags and return clean text + reasoning_content field.
+                  If reasoning_content is not explicitly provided (legacy model), <think> tags will be parsed to extract reasoning_content.
+                - "legacy": Keep <think> tags in text, and always return reasoning_content as an empty string for workflow consistency.
+
         Returns:
             tuple of (clean_text, reasoning_content)
         """
         
-        # Legacy mode: keep everything as-is, no reasoning_content extraction
+        # In 'separated' mode, if reasoning_content is not provided (legacy model), parse <think> tags to extract reasoning_content
         if reasoning_format == "legacy":
-            return text, None
+            return text, ""
         
         # Find all <think>...</think> blocks (case-insensitive)
         matches = cls._THINK_PATTERN.findall(text)
-        
-        # Auto mode: only process if tags are found, otherwise return original
-        if reasoning_format == "auto" and not matches:
-            return text, None
         
         # Extract reasoning content from all <think> blocks
         reasoning_content = '\n'.join(match.strip() for match in matches) if matches else ""
@@ -507,16 +540,8 @@ class LLMNode(BaseNode):
         # Clean up extra whitespace
         clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
         
-        # Field mode: always return reasoning_content field (even if empty string)
-        if reasoning_format == "field":
-            return clean_text, reasoning_content
-        
-        # Auto mode with tags found: return reasoning_content only if non-empty
-        if reasoning_format == "auto":
-            return clean_text, reasoning_content if reasoning_content else None
-        
-        # Unknown format, default to legacy behavior
-        return text, None
+        # Separated mode: always return clean text and reasoning_content
+        return clean_text, reasoning_content
 
     def _transform_chat_messages(
         self, messages: Sequence[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate, /
@@ -1045,7 +1070,7 @@ class LLMNode(BaseNode):
         invoke_result: LLMResult,
         saver: LLMFileSaver,
         file_outputs: list["File"],
-        reasoning_format: str = "auto",
+        reasoning_format: str = "separated",
     ) -> ModelInvokeCompletedEvent:
         buffer = io.StringIO()
         for text_part in LLMNode._save_multimodal_output_and_convert_result_to_markdown(
@@ -1057,7 +1082,31 @@ class LLMNode(BaseNode):
 
         # Split reasoning content from final text
         full_text = buffer.getvalue()
-        clean_text, reasoning_content = LLMNode._split_reasoning(full_text, reasoning_format)
+        
+        # Always provide reasoning_content for workflow consistency
+        if invoke_result.reasoning_content:
+            # Structured models: reasoning already separated
+            reasoning_content = invoke_result.reasoning_content
+            if reasoning_format == "legacy":
+                # Keep original format (with any existing tags)
+                clean_text = full_text  
+            # separated
+            else:  
+                # Already clean from structured models
+                clean_text = full_text  
+        else:
+            # Legacy models: extract from <think> tags
+            if reasoning_format == "legacy":
+                # Keep <think> tags in text
+                clean_text = full_text  
+                # No parsing needed for legacy mode
+                extracted_reasoning = ""
+            # separated  
+            else:  
+                extracted_clean_text, extracted_reasoning = LLMNode._split_reasoning(full_text, reasoning_format)
+                # Remove <think> tags
+                clean_text = extracted_clean_text  
+            reasoning_content = extracted_reasoning or ""
         
 
         return ModelInvokeCompletedEvent(
