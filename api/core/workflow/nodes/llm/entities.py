@@ -68,23 +68,19 @@ class LLMNodeData(BaseNodeData):
     structured_output: Mapping[str, Any] | None = None
     # We used 'structured_output_enabled' in the past, but it's not a good name.
     structured_output_switch_on: bool = Field(False, alias="structured_output_enabled")
-    reasoning_format: Literal["auto", "legacy", "field"] = Field(
-        default="auto",
+    reasoning_format: Literal["separated", "legacy"] = Field(
+        default="separated",
         description=(
             """
             Strategy for handling model reasoning output.
 
-            auto: Smart default
-                    If <think>…</think> blocks exist, strip the tags and move the inner text to
-                    `reasoning_content`. If no tags are present, leave the original text unchanged 
-                    and omit `reasoning_content` field.
+            separated: Return separated text (without <think> tags) + reasoning_content field.
+                       Recommended for new workflows. Enables safe downstream parsing and 
+                       workflow variable access: {{#node_id.reasoning_content#}}
 
-            legacy: Leave <think> tags intact; never set `reasoning_content`. 
-                    Use this for strict backward compatibility.
-
-            field : Always return a `reasoning_content` field. 
-                    If <think> tags are present, strip them and use the inner text;  
-                    if no tags are present, an empty string is returned.
+            legacy   : Return original text (with <think> tags) + reasoning_content field.
+                       Maintains full backward compatibility while still providing reasoning_content
+                       for workflow automation. Frontend thinking panels work as before.
             """
         )
     )
