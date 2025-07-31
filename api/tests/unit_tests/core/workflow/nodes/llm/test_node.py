@@ -69,7 +69,7 @@ def llm_node_data() -> LLMNodeData:
                 detail=ImagePromptMessageContent.DETAIL.HIGH,
             ),
         ),
-        reasoning_format="auto",
+        reasoning_format="separated",
     )
 
 
