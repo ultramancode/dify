@@ -101,7 +101,6 @@ const useConfig = (id: string, payload: LLMNodeType) => {
       })
       setInputs(newInputs)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultConfig, isChatModel])
 
   const [modelChanged, setModelChanged] = useState(false)
@@ -161,7 +160,6 @@ const useConfig = (id: string, payload: LLMNodeType) => {
       return
     setModelChanged(false)
     handleVisionConfigAfterModelChanged()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisionModel, modelChanged])
 
   // variables
@@ -317,6 +315,14 @@ const useConfig = (id: string, payload: LLMNodeType) => {
     return [VarType.arrayObject, VarType.array, VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.file, VarType.arrayFile].includes(varPayload.type)
   }, [])
 
+  // reasoning mode
+  const handleReasoningModeChange = useCallback((reasoningMode: 'tagged' | 'stripped') => {
+    const newInputs = produce(inputs, (draft) => {
+      draft.reasoning_mode = reasoningMode
+    })
+    setInputs(newInputs)
+  }, [inputs, setInputs])
+
   const {
     availableVars,
     availableNodesWithParent,
@@ -357,6 +363,7 @@ const useConfig = (id: string, payload: LLMNodeType) => {
     setStructuredOutputCollapsed,
     handleStructureOutputEnableChange,
     filterJinja2InputVar,
+    handleReasoningModeChange,
   }
 }
 
