@@ -68,15 +68,16 @@ class LLMNodeData(BaseNodeData):
     structured_output: Mapping[str, Any] | None = None
     # We used 'structured_output_enabled' in the past, but it's not a good name.
     structured_output_switch_on: bool = Field(False, alias="structured_output_enabled")
-    reasoning_mode: Literal["stripped", "tagged"] = Field(
+    reasoning_mode: Literal["separated", "tagged"] = Field(
         # Keep tagged as default for backward compatibility
         default="tagged",  
         description=(
             """
             Strategy for handling model reasoning output.
 
-            stripped: Return clean text (without <think> tags) + reasoning_content field.
+            separated: Return clean text (without <think> tags) + reasoning_content field.
                       Recommended for new workflows. Enables safe downstream parsing and 
+                      workflow variable access: {{#node_id.reasoning_content#}}
 
             tagged   : Return original text (with <think> tags) + reasoning_content field.
                       Maintains full backward compatibility while still providing reasoning_content

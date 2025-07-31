@@ -316,7 +316,7 @@ const useConfig = (id: string, payload: LLMNodeType) => {
   }, [])
 
   // reasoning mode
-  const handleReasoningModeChange = useCallback((reasoningMode: 'tagged' | 'stripped') => {
+  const handleReasoningModeChange = useCallback((reasoningMode: 'tagged' | 'separated') => {
     const newInputs = produce(inputs, (draft) => {
       draft.reasoning_mode = reasoningMode
     })

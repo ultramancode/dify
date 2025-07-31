@@ -282,7 +282,7 @@ class LLMNode(BaseNode):
                     if self._node_data.reasoning_mode == "tagged":
                         # Keep <think> tags for backward compatibility
                         clean_text = result_text  
-                    # stripped
+                    # separated
                     else:  
                         if reasoning_content:
                             # Future: Plugins that send clean reasoning_content (currently unused)
@@ -367,7 +367,7 @@ class LLMNode(BaseNode):
         file_saver: LLMFileSaver,
         file_outputs: list["File"],
         node_id: str,
-        reasoning_mode: str = "stripped",
+        reasoning_mode: str = "separated",
     ) -> Generator[NodeEvent | LLMStructuredOutput, None, None]:
         model_schema = model_instance.model_type_instance.get_model_schema(
             node_data_model.name, model_instance.credentials
@@ -414,7 +414,7 @@ class LLMNode(BaseNode):
         file_saver: LLMFileSaver,
         file_outputs: list["File"],
         node_id: str,
-        reasoning_mode: str = "stripped",
+        reasoning_mode: str = "separated",
     ) -> Generator[NodeEvent | LLMStructuredOutput, None, None]:
         # For blocking mode
         if isinstance(invoke_result, LLMResult):
@@ -483,7 +483,7 @@ class LLMNode(BaseNode):
             if reasoning_mode == "tagged":
                 # Keep original format (with any existing tags)
                 clean_text = full_text  
-            # stripped
+            # separated
             else:  
                 # Remove <think> tags for clean text
                 clean_text, _ = LLMNode._split_reasoning(full_text, reasoning_mode)
@@ -494,7 +494,7 @@ class LLMNode(BaseNode):
                 clean_text = full_text  
                 # No parsing needed for tagged mode
                 extracted_reasoning = ""  
-            # stripped
+            # separated
             else:  
                 # Extract clean text and reasoning from <think> tags
                 extracted_clean_text, extracted_reasoning = LLMNode._split_reasoning(full_text, reasoning_mode)
@@ -503,8 +503,8 @@ class LLMNode(BaseNode):
             reasoning_content = extracted_reasoning or ""
         
         yield ModelInvokeCompletedEvent(
-            # Use clean_text for stripped mode, full_text for tagged mode
-            text=clean_text if reasoning_mode == "stripped" else full_text,  
+            # Use clean_text for separated mode, full_text for tagged mode
+            text=clean_text if reasoning_mode == "separated" else full_text,  
             usage=usage, 
             finish_reason=finish_reason,
             # Separate reasoning field for API/plugins
@@ -520,7 +520,7 @@ class LLMNode(BaseNode):
     def _split_reasoning(
         cls, 
         text: str, 
-        reasoning_mode: Literal["stripped", "tagged"] = "tagged"
+        reasoning_mode: Literal["separated", "tagged"] = "tagged"
     ) -> tuple[str, str | None]:
         """
         Split reasoning content from text based on reasoning_mode strategy.
@@ -528,7 +528,7 @@ class LLMNode(BaseNode):
         Args:
             text: Full text that may contain <think> blocks
             reasoning_mode: Strategy for handling reasoning content
-                - "stripped": Remove <think> tags and return clean text + reasoning_content field.
+                - "separated": Remove <think> tags and return clean text + reasoning_content field.
                 If reasoning_content is not explicitly provided (legacy model), 
                 <think> tags will be parsed to extract reasoning_content.
                 - "tagged": Keep <think> tags in text, and always return reasoning_content 
@@ -555,7 +555,7 @@ class LLMNode(BaseNode):
         # Clean up extra whitespace
         clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
         
-        # Stripped mode: always return clean text and reasoning_content
+        # Separated mode: always return clean text and reasoning_content
         return clean_text, reasoning_content
 
     def _transform_chat_messages(
@@ -1107,7 +1107,7 @@ class LLMNode(BaseNode):
             if reasoning_mode == "tagged":
                 # Keep original format (with any existing tags)
                 clean_text = full_text  
-            # stripped
+            # separated
             else:  
                 # Remove <think> tags for clean text
                 clean_text, _ = LLMNode._split_reasoning(full_text, reasoning_mode)
@@ -1118,7 +1118,7 @@ class LLMNode(BaseNode):
                 clean_text = full_text  
                 # No parsing needed for tagged mode
                 extracted_reasoning = ""
-            # stripped  
+            # separated  
             else:  
                 # Extract clean text and reasoning from <think> tags
                 extracted_clean_text, extracted_reasoning = LLMNode._split_reasoning(full_text, reasoning_mode)
@@ -1128,8 +1128,8 @@ class LLMNode(BaseNode):
         
 
         return ModelInvokeCompletedEvent(
-            # Use clean_text for stripped mode, full_text for tagged mode
-            text=clean_text if reasoning_mode == "stripped" else full_text,  
+            # Use clean_text for separated mode, full_text for tagged mode
+            text=clean_text if reasoning_mode == "separated" else full_text,  
             usage=invoke_result.usage,
             finish_reason=None,
             # Separate reasoning field for API/plugins
