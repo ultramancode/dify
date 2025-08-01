@@ -68,7 +68,7 @@ class LLMNodeData(BaseNodeData):
     structured_output: Mapping[str, Any] | None = None
     # We used 'structured_output_enabled' in the past, but it's not a good name.
     structured_output_switch_on: bool = Field(False, alias="structured_output_enabled")
-    reasoning_mode: Literal["separated", "tagged"] = Field(
+    reasoning_format: Literal["separated", "tagged"] = Field(
         # Keep tagged as default for backward compatibility
         default="tagged",  
         description=(

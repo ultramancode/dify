@@ -435,8 +435,8 @@ const translation = {
         variable: 'Variable',
       },
       sysQueryInUser: 'sys.query in user message is required',
-      reasoningMode: {
-        title: 'Separate <think> Tag Content',
+      reasoningFormat: {
+        title: 'Separate reasoning tag',
         tagged: 'Keep <think> ...</think> Tags',
         separated: 'Separate <think> ...</think> Tags',
         tooltip: 'Extract content from <think>...</think> and store it in the reasoning_content field.',

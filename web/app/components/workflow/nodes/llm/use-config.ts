@@ -316,9 +316,9 @@ const useConfig = (id: string, payload: LLMNodeType) => {
   }, [])
 
   // reasoning mode
-  const handleReasoningModeChange = useCallback((reasoningMode: 'tagged' | 'separated') => {
+  const handleReasoningFormatChange = useCallback((reasoningFormat: 'tagged' | 'separated') => {
     const newInputs = produce(inputs, (draft) => {
-      draft.reasoning_mode = reasoningMode
+      draft.reasoning_format = reasoningFormat
     })
     setInputs(newInputs)
   }, [inputs, setInputs])
@@ -363,7 +363,7 @@ const useConfig = (id: string, payload: LLMNodeType) => {
     setStructuredOutputCollapsed,
     handleStructureOutputEnableChange,
     filterJinja2InputVar,
-    handleReasoningModeChange,
+    handleReasoningFormatChange,
   }
 }
 

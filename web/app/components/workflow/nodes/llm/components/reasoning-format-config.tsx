@@ -4,13 +4,13 @@ import { useTranslation } from 'react-i18next'
 import Field from '@/app/components/workflow/nodes/_base/components/field'
 import Switch from '@/app/components/base/switch'
 
-type ReasoningModeConfigProps = {
+type ReasoningFormatConfigProps = {
   value?: 'tagged' | 'separated'
   onChange: (value: 'tagged' | 'separated') => void
   readonly?: boolean
 }
 
-const ReasoningModeConfig: FC<ReasoningModeConfigProps> = ({
+const ReasoningFormatConfig: FC<ReasoningFormatConfigProps> = ({
   value = 'tagged',
   onChange,
   readonly = false,
@@ -19,8 +19,8 @@ const ReasoningModeConfig: FC<ReasoningModeConfigProps> = ({
 
   return (
     <Field
-      title={t('workflow.nodes.llm.reasoningMode.title')}
-      tooltip={t('workflow.nodes.llm.reasoningMode.tooltip')}
+      title={t('workflow.nodes.llm.reasoningFormat.title')}
+      tooltip={t('workflow.nodes.llm.reasoningFormat.tooltip')}
       operations={
         <Switch
           defaultValue={value === 'separated'} // ON = separated (제거), OFF = tagged (유지)
@@ -36,4 +36,4 @@ const ReasoningModeConfig: FC<ReasoningModeConfigProps> = ({
   )
 }
 
-export default ReasoningModeConfig
+export default ReasoningFormatConfig

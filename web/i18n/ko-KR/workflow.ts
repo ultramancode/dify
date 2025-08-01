@@ -456,6 +456,12 @@ const translation = {
         variable: '변수',
       },
       sysQueryInUser: '사용자 메시지에 sys.query 가 필요합니다',
+      reasoningFormat: {
+        title: '추론 태그 분리',
+        tagged: '<think> ...</think> 태그 유지',
+        separated: '<think> ...</think> 태그 분리',
+        tooltip: '<think>...</think>에서 내용을 추출하여 reasoning_content 필드에 저장합니다.',
+      },
       jsonSchema: {
         warningTips: {
           saveSchema: '현재 필드의 편집을 완료한 후 스키마를 저장하세요.',
